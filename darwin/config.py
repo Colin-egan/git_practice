@@ -46,6 +46,20 @@ SIGNUP_GRANT_MICRO = int(os.environ.get("SIGNUP_GRANT_MICRO", "1_000_000"))
 # drain a wallet past what the pre-flight check reserved.
 MAX_COMPLETION_TOKENS = int(os.environ.get("MAX_COMPLETION_TOKENS", "4096"))
 
+# --- Real-money edges (Stripe). All inert until STRIPE_SECRET_KEY is set. ---
+STRIPE_SECRET_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_API_BASE = os.environ.get("STRIPE_API_BASE", "https://api.stripe.com")
+
+# Public URL of this deployment, used for Checkout redirect targets.
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "http://127.0.0.1:8000")
+
+# Smallest cash-out, in micro-USD (default $5) — keeps payout overhead sane.
+WITHDRAW_MIN_MICRO = int(os.environ.get("WITHDRAW_MIN_MICRO", "5_000_000"))
+
+# Bearer token for admin endpoints (payout queue). Unset = admin API disabled.
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "")
+
 
 def price_for(model: str) -> tuple[int, int]:
     p = PRICING.get(model, FALLBACK_PRICING)

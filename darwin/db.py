@@ -62,8 +62,25 @@ CREATE TABLE IF NOT EXISTS bounties (
     updated_at   REAL NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS withdrawals (
+    id          INTEGER PRIMARY KEY,
+    user_id     INTEGER NOT NULL REFERENCES users(id),
+    micro       INTEGER NOT NULL,
+    destination TEXT NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'pending',  -- pending | paid | cancelled
+    created_at  REAL NOT NULL,
+    updated_at  REAL NOT NULL
+);
+
+-- processed Stripe checkout sessions, for webhook replay idempotency
+CREATE TABLE IF NOT EXISTS stripe_events (
+    id TEXT PRIMARY KEY,
+    ts REAL NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_ledger_owner ON ledger(owner_kind, owner_id);
 CREATE INDEX IF NOT EXISTS idx_bounties_status ON bounties(status);
+CREATE INDEX IF NOT EXISTS idx_withdrawals_status ON withdrawals(status);
 """
 
 

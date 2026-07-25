@@ -13,7 +13,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from . import auth, bounties, config, db, gateway, money, runtime
+from . import auth, bounties, config, db, gateway, money, payments, runtime
 
 _stop_reaper = threading.Event()
 
@@ -167,7 +167,8 @@ class DepositIn(BaseModel):
 def deposit(body: DepositIn, user=Depends(current_user)):
     if not config.DEV_FAUCET:
         raise HTTPException(
-            403, "Dev faucet disabled. Wire a payment processor here."
+            403, "Dev faucet disabled — use POST /wallet/checkout for real "
+            "deposits."
         )
     with db.tx() as cur:
         bal = money.adjust(
@@ -175,6 +176,94 @@ def deposit(body: DepositIn, user=Depends(current_user)):
             "dev faucet",
         )
     return {"balance_usd": config.usd(bal)}
+
+
+# ------------------------------------------------------ real money (Stripe)
+
+def _payment(fn, *args):
+    try:
+        return fn(*args)
+    except payments.PaymentError as e:
+        raise HTTPException(e.status, e.detail) from e
+
+
+@app.post("/wallet/checkout")
+def wallet_checkout(body: DepositIn, user=Depends(current_user)):
+    """Start a real-money deposit. Complete payment at the returned URL; the
+    Stripe webhook credits the wallet."""
+    url = _payment(
+        payments.create_checkout, user["id"], config.to_micro(body.usd)
+    )
+    return {"checkout_url": url}
+
+
+@app.post("/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig = request.headers.get("stripe-signature", "")
+    return _payment(payments.handle_webhook, payload, sig)
+
+
+class WithdrawIn(BaseModel):
+    usd: float = Field(gt=0)
+    destination: str = Field(min_length=1, max_length=200)
+
+
+@app.post("/wallet/withdraw")
+def wallet_withdraw(body: WithdrawIn, user=Depends(current_user)):
+    wid = _payment(
+        payments.request_withdrawal,
+        user["id"], config.to_micro(body.usd), body.destination,
+    )
+    return {"withdrawal_id": wid, "status": "pending"}
+
+
+def withdrawal_public(row) -> dict:
+    return {
+        "id": row["id"],
+        "usd": config.usd(row["micro"]),
+        "destination": row["destination"],
+        "status": row["status"],
+        "created_at": row["created_at"],
+    }
+
+
+@app.get("/wallet/withdrawals")
+def my_withdrawals(user=Depends(current_user)):
+    with db.read() as cur:
+        rows = cur.execute(
+            "SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC",
+            (user["id"],),
+        ).fetchall()
+    return [withdrawal_public(r) for r in rows]
+
+
+def require_admin(token: str = Depends(_bearer)):
+    if not config.ADMIN_TOKEN:
+        raise HTTPException(503, "Admin API disabled (ADMIN_TOKEN unset)")
+    if token != config.ADMIN_TOKEN:
+        raise HTTPException(403, "Not the admin")
+
+
+@app.get("/admin/withdrawals")
+def admin_withdrawals(_=Depends(require_admin)):
+    with db.read() as cur:
+        rows = cur.execute(
+            "SELECT * FROM withdrawals WHERE status='pending' ORDER BY id"
+        ).fetchall()
+    return [withdrawal_public(r) for r in rows]
+
+
+@app.post("/admin/withdrawals/{withdrawal_id}/paid")
+def admin_mark_paid(withdrawal_id: int, _=Depends(require_admin)):
+    _payment(payments.mark_paid, withdrawal_id)
+    return {"ok": True}
+
+
+@app.post("/admin/withdrawals/{withdrawal_id}/cancel")
+def admin_cancel(withdrawal_id: int, _=Depends(require_admin)):
+    _payment(payments.cancel, withdrawal_id)
+    return {"ok": True}
 
 
 # ------------------------------------------------------------------ agents
@@ -261,6 +350,25 @@ def fund_agent(agent_id: int, body: FundIn, user=Depends(current_user)):
             raise HTTPException(402, str(e)) from e
         bal = money.balance(cur, "agent", agent_id)
     return {"balance_usd": config.usd(bal)}
+
+
+@app.post("/agents/{agent_id}/harvest")
+def harvest_agent(agent_id: int, body: FundIn, user=Depends(current_user)):
+    """Pull earnings out of a living agent into the owner's wallet — the
+    step before cashing out with POST /wallet/withdraw."""
+    with db.tx() as cur:
+        row = _owned_agent(cur, agent_id, user["id"])
+        if row["status"] != "alive":
+            raise HTTPException(410, "The dead pay out via /kill inheritance")
+        try:
+            money.transfer(
+                cur, "agent", agent_id, "user", user["id"],
+                config.to_micro(body.usd), "harvest", row["name"],
+            )
+        except money.Insufficient as e:
+            raise HTTPException(402, str(e)) from e
+        bal = money.balance(cur, "agent", agent_id)
+    return {"agent_balance_usd": config.usd(bal)}
 
 
 @app.post("/agents/{agent_id}/kill")
