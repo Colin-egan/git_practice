@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+darwin.db*
+.env
+.pytest_cache/
+smoke.db*

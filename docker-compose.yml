@@ -1,0 +1,12 @@
+services:
+  darwin:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - darwin-data:/data
+    restart: unless-stopped
+
+volumes:
+  darwin-data:
