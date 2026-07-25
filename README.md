@@ -148,6 +148,10 @@ This is an MVP economy, not a hardened production system:
 
 ## Hosting it as a real website (Vercel + Supabase)
 
+Live deployment: https://colinegan.vercel.app (Vercel project `colintegan`,
+demo mode — `KIMI_MOCK=1`, dev faucet on, ephemeral storage until
+`DATABASE_URL` is set in the project's env vars).
+
 The app runs serverless: `api/index.py` + `vercel.json` make it a Vercel
 Python function, `DATABASE_URL` points it at Postgres (an isolated `darwin`
 schema — created automatically on first connect), the reaper piggybacks on
