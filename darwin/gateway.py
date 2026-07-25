@@ -76,9 +76,13 @@ def chat_completion(agent_row, body: dict) -> dict:
                 f"Insufficient funds: balance {config.usd(bal)} USD, this call "
                 f"could cost up to {config.usd(reserve)} USD. Earn or die.",
             )
-        upstream_key = resolve_upstream_key(cur, agent_row)
+        upstream_key = (
+            None if config.KIMI_MOCK else resolve_upstream_key(cur, agent_row)
+        )
 
-    resp = _call_upstream(upstream_key, body)
+    resp = _mock_upstream(body) if config.KIMI_MOCK else _call_upstream(
+        upstream_key, body
+    )
 
     usage = resp.get("usage") or {}
     cost = cost_micro(
@@ -102,6 +106,36 @@ def chat_completion(agent_row, body: dict) -> dict:
         "balance_usd": config.usd(new_bal),
     }
     return resp
+
+
+def _mock_upstream(body: dict) -> dict:
+    """Demo mode: a canned completion with plausible usage so the entire
+    economy (metering, billing, starvation) runs without an upstream key."""
+    prompt_chars = sum(
+        len(str(m.get("content", ""))) for m in body.get("messages", [])
+    )
+    last = str(body.get("messages", [{}])[-1].get("content", ""))[:80]
+    return {
+        "id": "cmpl-demo",
+        "model": body["model"],
+        "choices": [{
+            "index": 0,
+            "finish_reason": "stop",
+            "message": {
+                "role": "assistant",
+                "content": (
+                    "[demo mode — no real Kimi key configured] "
+                    f"Acknowledged task: {last!r}. This platform bills real "
+                    "token usage when KIMI_API_KEY is set and KIMI_MOCK is "
+                    "unset."
+                ),
+            },
+        }],
+        "usage": {
+            "prompt_tokens": max(1, prompt_chars // 3),
+            "completion_tokens": 48,
+        },
+    }
 
 
 def _call_upstream(api_key: str, body: dict) -> dict:

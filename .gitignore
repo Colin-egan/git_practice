@@ -4,3 +4,5 @@ darwin.db*
 .env
 .pytest_cache/
 smoke.db*
+api/_env.py
+.vercel/

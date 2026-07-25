@@ -90,6 +90,28 @@ def reap_once() -> list[int]:
     return doomed
 
 
+def maybe_reap() -> list[int]:
+    """Opportunistic reaper for serverless deployments: piggybacks on request
+    traffic, at most once per REAPER_INTERVAL. The meta-row update inside a
+    transaction makes concurrent instances elect a single reaper."""
+    now = time.time()
+    with db.tx() as cur:
+        row = cur.execute(
+            "SELECT value FROM meta WHERE key='last_reap'"
+        ).fetchone()
+        if row is None:
+            cur.execute(
+                "INSERT INTO meta (key, value) VALUES ('last_reap', ?)", (now,)
+            )
+        elif now - row["value"] >= config.REAPER_INTERVAL:
+            cur.execute(
+                "UPDATE meta SET value=? WHERE key='last_reap'", (now,)
+            )
+        else:
+            return []
+    return reap_once()
+
+
 def reaper_loop(stop_event) -> None:
     while not stop_event.wait(config.REAPER_INTERVAL):
         try:

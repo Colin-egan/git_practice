@@ -4,7 +4,29 @@ them without code changes. Money is always integer micro-USD (1_000_000 = $1).""
 import json
 import os
 
-DB_PATH = os.environ.get("DARWIN_DB", "darwin.db")
+# Serverless mode (auto-on under Vercel): no reaper thread (an opportunistic
+# per-request reaper runs instead) and no local agent subprocesses — agents
+# connect from anywhere using their token.
+SERVERLESS = bool(os.environ.get("VERCEL") or os.environ.get("DARWIN_SERVERLESS"))
+
+# On serverless the code dir is read-only; /tmp SQLite keeps the app alive
+# (ephemeral, per-instance) until DATABASE_URL points at real Postgres.
+DB_PATH = os.environ.get(
+    "DARWIN_DB", "/tmp/darwin.db" if SERVERLESS else "darwin.db"
+)
+
+# Postgres DSN(s) for production. Comma-separated candidates are tried in
+# order (transaction pooler first is the right call for serverless). Empty =
+# local SQLite.
+DATABASE_URLS = [
+    u.strip() for u in os.environ.get("DATABASE_URL", "").split(",") if u.strip()
+]
+PG_SCHEMA_NAME = os.environ.get("PG_SCHEMA_NAME", "darwin")
+
+# Demo mode: the gateway returns canned completions with plausible token
+# usage instead of calling Moonshot — the whole economy works publicly with
+# no upstream key. Unset it (and set KIMI_API_KEY) to go real.
+KIMI_MOCK = os.environ.get("KIMI_MOCK", "") == "1"
 
 # Upstream Kimi / Moonshot (OpenAI-compatible). Use api.moonshot.cn for the
 # mainland endpoint.

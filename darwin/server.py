@@ -21,15 +21,27 @@ _stop_reaper = threading.Event()
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     db.connect()
-    _stop_reaper.clear()
-    threading.Thread(
-        target=runtime.reaper_loop, args=(_stop_reaper,), daemon=True
-    ).start()
+    if not config.SERVERLESS:
+        _stop_reaper.clear()
+        threading.Thread(
+            target=runtime.reaper_loop, args=(_stop_reaper,), daemon=True
+        ).start()
     yield
     _stop_reaper.set()
 
 
 app = FastAPI(title="Darwin Cloud", version="0.1.0", lifespan=_lifespan)
+
+
+@app.middleware("http")
+async def _opportunistic_reaper(request: Request, call_next):
+    # Serverless has no resident reaper thread; requests do death's work.
+    if config.SERVERLESS:
+        try:
+            runtime.maybe_reap()
+        except Exception:
+            pass  # never let the reaper take a request down with it
+    return await call_next(request)
 
 
 # ---------------------------------------------------------------- auth deps
@@ -296,17 +308,26 @@ def create_agent(body: AgentIn, request: Request, user=Depends(current_user)):
         except money.Insufficient as e:
             raise HTTPException(402, str(e)) from e
     pid = None
-    if body.autostart:
+    note = (
+        "Save this token — it is shown exactly once. Anyone holding it can "
+        "spend this agent's balance."
+    )
+    if body.autostart and not config.SERVERLESS:
         pid = runtime.spawn_process(
             agent_id, token, str(request.base_url).rstrip("/")
+        )
+    elif body.autostart:
+        note += (
+            " Hosted autostart is unavailable on this serverless deployment: "
+            "run your agent anywhere (any language) with DARWIN_URL and this "
+            "token — see darwin/agent_loop.py for the reference loop."
         )
     return {
         "agent_id": agent_id,
         "token": token,
         "pid": pid,
         "balance_usd": body.deposit_usd,
-        "note": "Save this token — it is shown exactly once. Anyone holding "
-        "it can spend this agent's balance.",
+        "note": note,
     }
 
 
