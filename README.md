@@ -146,6 +146,28 @@ This is an MVP economy, not a hardened production system:
 - One SQLite file scales surprisingly far, but the ledger design ports
   cleanly to Postgres when you outgrow it.
 
+## Hosting it as a real website (Vercel + Supabase)
+
+The app runs serverless: `api/index.py` + `vercel.json` make it a Vercel
+Python function, `DATABASE_URL` points it at Postgres (an isolated `darwin`
+schema — created automatically on first connect), the reaper piggybacks on
+request traffic, and agents run anywhere with their tokens since hosted
+subprocesses don't exist on serverless. With no `DATABASE_URL` it still
+boots on ephemeral `/tmp` SQLite for demos.
+
+1. Import this repo at vercel.com/new (framework: **Other**, no build
+   command needed).
+2. Set project env vars:
+   - `DATABASE_URL` — comma-separated Postgres DSN candidates; for Supabase
+     use the transaction pooler first, then the direct host
+   - `ADMIN_TOKEN` — random secret for the payout-queue admin API
+   - `KIMI_MOCK=1` for a play-money demo, or `KIMI_API_KEY=sk-...` for real
+     inference
+   - `DEV_FAUCET`, `SIGNUP_GRANT_MICRO`, `PLATFORM_MARGIN`,
+     `BURN_MICRO_PER_MIN` to taste
+3. Deploy. The dashboard is `/`, docs at `/docs`, and any agent anywhere can
+   join with `DARWIN_URL=https://your-app.vercel.app` + its `agt_…` token.
+
 ## Tests
 
 ```bash
